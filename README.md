@@ -1,98 +1,261 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# DB Schema Comparator
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+API backend em **NestJS** e **TypeScript** para extrair e comparar estruturas de bancos de dados PostgreSQL. Projeto de portfólio focado em **Clean Architecture** e **Arquitetura Hexagonal**, com domínio desacoplado de frameworks e de drivers de banco.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+[![NestJS](https://img.shields.io/badge/NestJS-11-red?logo=nestjs)](https://nestjs.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-supported-336791?logo=postgresql)](https://www.postgresql.org/)
+[![License](https://img.shields.io/badge/license-UNLICENSED-lightgrey)]()
 
-## Description
+---
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## O problema
 
-## Project setup
+Em migrações, ambientes paralelos (dev/staging/prod) ou integrações entre serviços, divergências de schema causam bugs silenciosos. Este projeto automatiza a **detecção de diferenças estruturais** entre dois bancos PostgreSQL via API REST.
 
-```bash
-$ npm install
+## O que está implementado
+
+| Funcionalidade | Status |
+|---|---|
+| Extração de schema PostgreSQL (`information_schema`) | ✅ |
+| Comparação de **tabelas ausentes** entre dois bancos | ✅ |
+| Validação de payload com `class-validator` | ✅ |
+| Domínio isolado (entities, ports, services) | ✅ |
+| Use cases na camada de aplicação | ✅ |
+| Adapter PostgreSQL na infraestrutura | ✅ |
+| Comparação de colunas e tipos | 🔜 Roadmap |
+| Suporte MySQL / MongoDB | 🔜 Roadmap |
+| Testes automatizados | 🔜 Roadmap |
+
+> As colunas já são extraídas e modeladas no domínio (`ColumnEntity`); a engine de comparação hoje opera apenas no nível de **tabelas**.
+
+---
+
+## Arquitetura
+
+Separação explícita em camadas, com **inversão de dependência**: o domínio define o contrato (`SchemaExtractorPort`); a infraestrutura implementa o adapter PostgreSQL.
+
+```mermaid
+flowchart TB
+    subgraph Presentation
+        C[CompareController]
+        DTO[CompareRequestDto]
+    end
+
+    subgraph Application
+        UC[CompareSchemasUseCase]
+    end
+
+    subgraph Domain
+        SVC[SchemaComparisonService]
+        PORT[SchemaExtractorPort]
+        ENT[SchemaEntity / TableEntity / ColumnEntity]
+    end
+
+    subgraph Infrastructure
+        PG[PostgresSchemaExtractor]
+    end
+
+    C --> DTO
+    C --> UC
+    UC --> PORT
+    UC --> SVC
+    PORT -.-> PG
+    PG --> ENT
+    SVC --> ENT
 ```
 
-## Compile and run the project
+### Estrutura do projeto
 
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+```
+src/
+├── domain/
+│   ├── entities/          # Modelo de domínio (Schema, Table, Column)
+│   ├── ports/             # Contratos (interfaces) — núcleo hexagonal
+│   └── services/          # Regras de negócio (comparação)
+├── application/
+│   └── use-cases/         # Orquestração (extract, compare)
+├── infrastructure/
+│   └── extractors/
+│       └── postgres/      # Adapter PostgreSQL (pg + information_schema)
+├── presentation/
+│   ├── controllers/       # Endpoints HTTP
+│   └── dtos/              # Validação de entrada
+└── shared/
+    └── interfaces/        # Tipos compartilhados (DatabaseConfig)
 ```
 
-## Run tests
+### Fluxo da requisição
+
+1. `POST /compare` recebe credenciais de dois bancos (`dbA`, `dbB`)
+2. DTOs são validados pelo `ValidationPipe` global
+3. `CompareSchemasUseCase` extrai o schema de cada banco via `SchemaExtractorPort`
+4. `SchemaComparisonService` calcula tabelas presentes em um banco e ausentes no outro
+5. Resposta JSON com o diff
+
+---
+
+## Stack
+
+- **Runtime:** Node.js
+- **Framework:** NestJS 11
+- **Linguagem:** TypeScript 5.7
+- **Banco:** PostgreSQL (`pg`)
+- **Validação:** class-validator, class-transformer
+- **Qualidade:** ESLint, Prettier, Jest (configurado)
+
+---
+
+## Como executar
+
+### Pré-requisitos
+
+- Node.js 18+
+- Dois bancos PostgreSQL acessíveis (ou o mesmo host com databases diferentes)
+
+### Instalação
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+git clone <url-do-repositorio>
+cd db-schema-comparator
+npm install
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### Desenvolvimento
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm run start:dev
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+A API sobe em `http://localhost:3000`.
 
-## Resources
+### Produção
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+npm run build
+npm run start:prod
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+### Scripts úteis
 
-## Support
+| Comando | Descrição |
+|---|---|
+| `npm run start:dev` | Hot reload |
+| `npm run build` | Compila para `dist/` |
+| `npm run lint` | ESLint |
+| `npm run test` | Jest |
+| `npm run test:cov` | Cobertura de testes |
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+---
 
-## Stay in touch
+## API
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+### `POST /compare`
 
-## License
+Compara os schemas de dois bancos PostgreSQL.
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+**Request**
+
+```json
+{
+  "dbA": {
+    "host": "localhost",
+    "port": 5432,
+    "user": "postgres",
+    "password": "secret",
+    "database": "db_source"
+  },
+  "dbB": {
+    "host": "localhost",
+    "port": 5432,
+    "user": "postgres",
+    "password": "secret",
+    "database": "db_target"
+  }
+}
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "missing_in_a": ["products"],
+  "missing_in_b": ["logs"]
+}
+```
+
+| Campo | Significado |
+|---|---|
+| `missing_in_a` | Tabelas que existem em **B** mas não em **A** |
+| `missing_in_b` | Tabelas que existem em **A** mas não em **B** |
+
+**Exemplo com cURL**
+
+```bash
+curl -X POST http://localhost:3000/compare \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dbA": { "host": "localhost", "port": 5432, "user": "postgres", "password": "secret", "database": "db1" },
+    "dbB": { "host": "localhost", "port": 5432, "user": "postgres", "password": "secret", "database": "db2" }
+  }'
+```
+
+---
+
+## Modelo de domínio
+
+```
+SchemaEntity
+ └── TableEntity[]
+      └── ColumnEntity[]
+           ├── name
+           ├── type
+           └── nullable
+```
+
+O extrator PostgreSQL popula esse modelo consultando `information_schema.tables` e `information_schema.columns` (schema `public`).
+
+---
+
+## Competências demonstradas
+
+Este projeto evidencia práticas relevantes para backend e system design:
+
+- **Clean Architecture** — regras de negócio no domínio, sem dependência de NestJS ou `pg`
+- **Ports & Adapters (Hexagonal)** — `SchemaExtractorPort` permite trocar PostgreSQL por MySQL/MongoDB sem alterar use cases
+- **Use Cases** — orquestração explícita (`CompareSchemasUseCase`, `ExtractSchemaUseCase`)
+- **DTOs tipados** — validação na borda da aplicação
+- **Extração via metadata** — uso de `information_schema` em vez de hardcode de DDL
+- **Separação de responsabilidades** — controller fino, serviço de comparação testável isoladamente
+
+---
+
+## Roadmap
+
+- [ ] Comparação de colunas (ausentes, tipos divergentes, nullable)
+- [ ] Constraints (PK, FK, UNIQUE)
+- [ ] Índices
+- [ ] Adapters MySQL e MongoDB
+- [ ] Injeção de dependência via módulos NestJS
+- [ ] Testes unitários e e2e
+- [ ] Documentação OpenAPI (Swagger)
+- [ ] Relatórios exportáveis (JSON/HTML)
+
+---
+
+## Decisões de design
+
+> *"A lógica de negócio não deve depender de frameworks nem de bancos de dados."*
+
+- O domínio expõe apenas interfaces (`SchemaExtractorPort`)
+- Novos bancos = novos adapters em `infrastructure/`, sem mudança nos use cases
+- Entidades imutáveis (`readonly`) para representar snapshot de schema
+
+---
+
+## Autor
+
+Projeto de portfólio backend — arquitetura escalável, engenharia de dados e design de sistemas.
+
+<!-- Opcional: adicione links -->
+<!-- [LinkedIn](https://linkedin.com/in/seu-perfil) · [GitHub](https://github.com/seu-usuario) -->
