@@ -18,16 +18,18 @@ Em migrações, ambientes paralelos (dev/staging/prod) ou integrações entre se
 | Funcionalidade | Status |
 |---|---|
 | Extração de schema PostgreSQL (`information_schema`) | ✅ |
-| Comparação de **tabelas ausentes** entre dois bancos | ✅ |
+| Comparação de tabelas ausentes (`onlyInSource` / `onlyInTarget`) | ✅ |
+| Comparação de colunas ausentes por tabela | ✅ |
+| Detecção de divergência de tipo e `nullable` | ✅ |
+| Resposta estruturada com `status`, `summary` e `differences` | ✅ |
+| Contrato tipado `SchemaComparisonResult` no domínio | ✅ |
 | Validação de payload com `class-validator` | ✅ |
-| Domínio isolado (entities, ports, services) | ✅ |
+| Domínio isolado (entities, contracts, ports, services) | ✅ |
 | Use cases na camada de aplicação | ✅ |
 | Adapter PostgreSQL na infraestrutura | ✅ |
-| Comparação de colunas e tipos | 🔜 Roadmap |
+| Constraints (PK, FK, UNIQUE) e índices | 🔜 Roadmap |
 | Suporte MySQL / MongoDB | 🔜 Roadmap |
 | Testes automatizados | 🔜 Roadmap |
-
-> As colunas já são extraídas e modeladas no domínio (`ColumnEntity`); a engine de comparação hoje opera apenas no nível de **tabelas**.
 
 ---
 
@@ -71,7 +73,8 @@ flowchart TB
 src/
 ├── domain/
 │   ├── entities/          # Modelo de domínio (Schema, Table, Column)
-│   ├── ports/             # Contratos (interfaces) — núcleo hexagonal
+│   ├── contracts/         # Contratos de saída (SchemaComparisonResult)
+│   ├── ports/             # Contratos de entrada (SchemaExtractorPort)
 │   └── services/          # Regras de negócio (comparação)
 ├── application/
 │   └── use-cases/         # Orquestração (extract, compare)
@@ -90,8 +93,8 @@ src/
 1. `POST /compare` recebe credenciais de dois bancos (`dbA`, `dbB`)
 2. DTOs são validados pelo `ValidationPipe` global
 3. `CompareSchemasUseCase` extrai o schema de cada banco via `SchemaExtractorPort`
-4. `SchemaComparisonService` calcula tabelas presentes em um banco e ausentes no outro
-5. Resposta JSON com o diff
+4. `SchemaComparisonService` compara tabelas e colunas entre `dbA` (source) e `dbB` (target)
+5. Resposta JSON com `status`, contadores em `summary` e diff detalhado em `differences`
 
 ---
 
@@ -179,15 +182,59 @@ Compara os schemas de dois bancos PostgreSQL.
 
 ```json
 {
-  "missing_in_a": ["products"],
-  "missing_in_b": ["logs"]
+  "status": "different",
+  "summary": {
+    "tables": 1,
+    "columns": 2
+  },
+  "differences": {
+    "tables": {
+      "onlyInSource": ["logs"],
+      "onlyInTarget": ["products"]
+    },
+    "columns": {
+      "onlyInSource": [
+        { "table": "users", "column": "phone" }
+      ],
+      "onlyInTarget": [
+        { "table": "users", "column": "legacy_id" }
+      ],
+      "modified": [
+        {
+          "table": "users",
+          "column": "email",
+          "source": { "type": "character varying", "nullable": true },
+          "target": { "type": "text", "nullable": false }
+        }
+      ]
+    }
+  }
 }
 ```
 
 | Campo | Significado |
 |---|---|
-| `missing_in_a` | Tabelas que existem em **B** mas não em **A** |
-| `missing_in_b` | Tabelas que existem em **A** mas não em **B** |
+| `status` | `identical` quando não há diferenças; `different` caso contrário |
+| `summary.tables` | Total de diferenças em nível de tabela |
+| `summary.columns` | Total de diferenças em nível de coluna (ausentes + modificadas) |
+| `differences.tables.onlyInSource` | Tabelas presentes em **dbA** e ausentes em **dbB** |
+| `differences.tables.onlyInTarget` | Tabelas presentes em **dbB** e ausentes em **dbA** |
+| `differences.columns.onlyInSource` | Colunas em **dbA** ausentes na mesma tabela em **dbB** |
+| `differences.columns.onlyInTarget` | Colunas em **dbB** ausentes na mesma tabela em **dbA** |
+| `differences.columns.modified` | Colunas com mesmo nome, mas `type` ou `nullable` divergentes |
+
+**Response quando schemas são idênticos**
+
+```json
+{
+  "status": "identical",
+  "summary": { "tables": 0, "columns": 0 },
+  "differences": {
+    "tables": { "onlyInSource": [], "onlyInTarget": [] },
+    "columns": { "onlyInSource": [], "onlyInTarget": [], "modified": [] }
+  }
+}
+```
 
 **Exemplo com cURL**
 
@@ -217,6 +264,23 @@ O extrator PostgreSQL popula esse modelo consultando `information_schema.tables`
 
 ---
 
+## Contrato de comparação
+
+O resultado da comparação é tipado em `domain/contracts/schema-comparison-result.ts`:
+
+```
+SchemaComparisonResult
+ ├── status: 'identical' | 'different'
+ ├── summary: { tables, columns }
+ └── differences
+      ├── tables: { onlyInSource[], onlyInTarget[] }
+      └── columns: { onlyInSource[], onlyInTarget[], modified[] }
+```
+
+A comparação de colunas só ocorre em tabelas com o **mesmo nome** nos dois bancos. Para cada par de colunas com o mesmo nome, o serviço verifica `type` e `nullable`.
+
+---
+
 ## Competências demonstradas
 
 Este projeto evidencia práticas relevantes para backend e system design:
@@ -227,12 +291,13 @@ Este projeto evidencia práticas relevantes para backend e system design:
 - **DTOs tipados** — validação na borda da aplicação
 - **Extração via metadata** — uso de `information_schema` em vez de hardcode de DDL
 - **Separação de responsabilidades** — controller fino, serviço de comparação testável isoladamente
+- **Contratos de domínio explícitos** — `SchemaComparisonResult` desacopla o formato da resposta da camada HTTP
 
 ---
 
 ## Roadmap
 
-- [ ] Comparação de colunas (ausentes, tipos divergentes, nullable)
+- [x] Comparação de colunas (ausentes, tipos divergentes, nullable)
 - [ ] Constraints (PK, FK, UNIQUE)
 - [ ] Índices
 - [ ] Adapters MySQL e MongoDB
