@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { CompareController } from './presentation/controllers/compare.controller';
+import { PresentationModule } from './presentation/presentation.module';
 
 @Module({
-  controllers: [CompareController],
+  imports: [PresentationModule],
 })
 export class AppModule {}
