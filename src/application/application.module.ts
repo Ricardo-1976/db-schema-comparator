@@ -3,6 +3,7 @@ import { SchemaComparisonService } from '../domain/services/schema-comparison.se
 import { InfrastructureModule } from '../infrastructure/infrastructure.module';
 import { CompareSchemasUseCase } from './use-cases/compare-schemas.use-case';
 import { ExtractSchemaUseCase } from './use-cases/extract-schema.use-case';
+import { GenerateComparisonPdfUseCase } from './use-cases/generate-comparison-pdf.use-case';
 
 @Module({
   imports: [InfrastructureModule],
@@ -10,7 +11,12 @@ import { ExtractSchemaUseCase } from './use-cases/extract-schema.use-case';
     SchemaComparisonService,
     CompareSchemasUseCase,
     ExtractSchemaUseCase,
+    GenerateComparisonPdfUseCase,
   ],
-  exports: [CompareSchemasUseCase, ExtractSchemaUseCase],
+  exports: [
+    CompareSchemasUseCase,
+    ExtractSchemaUseCase,
+    GenerateComparisonPdfUseCase,
+  ],
 })
 export class ApplicationModule {}
